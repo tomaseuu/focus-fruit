@@ -1,7 +1,9 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import MyApp from "./MyApp"; 
-import "./index.css"; 
+import "./main.css";
+import "./index.css";
+import MyApp from "./MyApp";
+
 
 const rootElement = document.getElementById("root");
 
@@ -12,7 +14,7 @@ if (!rootElement) {
   const root = ReactDOM.createRoot(rootElement);
   root.render(
     <React.StrictMode>
-      <MyApp />
+      <MyApp />   
     </React.StrictMode>
   );
 }
