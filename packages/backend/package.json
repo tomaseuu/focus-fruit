@@ -1,14 +1,22 @@
 {
   "name": "backend",
   "version": "1.0.0",
+  "type": "module",
   "main": "backend.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "nodemon backend.js",
+    "start": "node backend.js"
   },
   "author": "",
   "license": "ISC",
   "description": "",
   "devDependencies": {
     "nodemon": "^3.1.7"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "pg": "^8.18.0"
   }
 }

@@ -3,8 +3,10 @@ import { Card } from "../components/Card";
 import { Button } from "../components/Button";
 import { Modal } from "../components/Modal";
 import { Play, Pause, RotateCcw } from "lucide-react";
+import { apiFetch } from "../api";
 
 export function FocusSession() {
+  const [hydrating, setHydrating] = useState(true);
   const [focusLength, setFocusLength] = useState(25);
   const [breakLength, setBreakLength] = useState(5);
   const [cycles, setCycles] = useState(4);
@@ -17,6 +19,8 @@ export function FocusSession() {
   const [clarity, setClarity] = useState("");
   const [note, setNote] = useState("");
 
+  const [activeSession, setActiveSession] = useState(null);
+
   const tasks = useMemo(
     () => [
       "Review project proposal",
@@ -28,24 +32,77 @@ export function FocusSession() {
     [],
   );
 
+  // 🔥 Restore active session on load
   useEffect(() => {
-    let intervalId = null;
+    async function checkActive() {
+      try {
+        const data = await apiFetch("/sessions/active");
 
-    if (isRunning && timeLeft > 0) {
-      intervalId = window.setInterval(() => {
-        setTimeLeft((prev) => prev - 1);
-      }, 1000);
+        if (data.active) {
+          setActiveSession(data.session);
+          setIsRunning(true);
+
+          const startedStr = data.session.started_at;
+          const started = new Date(
+            startedStr.endsWith("Z") ? startedStr : `${startedStr}Z`,
+          );
+
+          const now = new Date();
+          const rawElapsed = Math.floor(
+            (now.getTime() - started.getTime()) / 1000,
+          );
+
+          // if parsing ever causes negative elapsed, clamp to 0
+          const elapsedSeconds = Math.max(0, rawElapsed);
+
+          const remaining = Math.max(0, focusLength * 60 - elapsedSeconds);
+
+          if (remaining > 0) {
+            setTimeLeft(remaining);
+          } else {
+            setTimeLeft(0);
+          }
+        }
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setHydrating(false);
+      }
     }
 
-    if (isRunning && timeLeft === 0) {
+    checkActive();
+  }, []);
+
+  // 🔥 Timer interval
+  useEffect(() => {
+    if (!isRunning) return;
+
+    const intervalId = setInterval(() => {
+      setTimeLeft((prev) => prev - 1);
+    }, 1000);
+
+    return () => clearInterval(intervalId);
+  }, [isRunning]);
+
+  // 🔥 When timer hits 0
+  useEffect(() => {
+    if (!isRunning) return;
+
+    if (timeLeft <= 0) {
+      async function endSession() {
+        try {
+          await apiFetch("/sessions/end", { method: "POST" });
+          setActiveSession(null);
+        } catch (err) {
+          console.error(err);
+        }
+      }
+
       setIsRunning(false);
+      endSession();
       setShowReflection(true);
     }
-
-    return () => {
-      if (intervalId) window.clearInterval(intervalId);
-    };
-  }, [isRunning, timeLeft]);
+  }, [timeLeft, isRunning]);
 
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
@@ -53,18 +110,43 @@ export function FocusSession() {
     return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
   };
 
-  const handleStart = () => {
+  const handleStart = async () => {
     if (!selectedTask) {
       alert("Please select a task first");
       return;
     }
-    setIsRunning(true);
+
+    try {
+      const session = await apiFetch("/sessions/start", {
+        method: "POST",
+        body: JSON.stringify({ task_id: null }),
+      });
+
+      setActiveSession(session);
+      setIsRunning(true);
+    } catch (err) {
+      console.error(err);
+      alert(err.message);
+    }
   };
 
-  const handlePause = () => setIsRunning(false);
-
-  const handleReset = () => {
+  const handlePause = () => {
     setIsRunning(false);
+  };
+
+  const handleReset = async () => {
+    setIsRunning(false);
+
+    if (activeSession) {
+      try {
+        await apiFetch("/sessions/end", { method: "POST" });
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setActiveSession(null);
+      }
+    }
+
     setTimeLeft(focusLength * 60);
   };
 
@@ -72,21 +154,31 @@ export function FocusSession() {
     setShowReflection(false);
     setClarity("");
     setNote("");
-    handleReset();
+    setTimeLeft(focusLength * 60);
   };
 
   const total = focusLength * 60;
   const progress = total > 0 ? ((total - timeLeft) / total) * 100 : 0;
+
   const radius = 120;
   const circumference = 2 * Math.PI * radius;
 
+  if (hydrating) {
+    return (
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <Card padding="lg" className="text-center">
+          <h1 className="text-2xl text-[#1F2937] mb-2">Focus Session</h1>
+          <p className="text-[#6B7280]">Restoring session…</p>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-      {/* Timer Card */}
       <Card padding="lg" className="text-center">
         <h1 className="text-2xl text-[#1F2937] mb-8">Focus Session</h1>
 
-        {/* Timer Display */}
         <div className="mb-8">
           <div className="relative inline-block">
             <svg className="w-64 h-64 -rotate-90">
@@ -120,7 +212,6 @@ export function FocusSession() {
           </div>
         </div>
 
-        {/* Controls */}
         <div className="flex items-center justify-center gap-4 mb-8">
           {!isRunning ? (
             <Button variant="primary" size="lg" onClick={handleStart}>
@@ -140,7 +231,6 @@ export function FocusSession() {
           </Button>
         </div>
 
-        {/* Task Selection */}
         <div className="max-w-md mx-auto mb-6">
           <label className="block text-left text-sm text-[#6B7280] mb-2">
             Select Task
@@ -149,8 +239,8 @@ export function FocusSession() {
           <select
             value={selectedTask}
             onChange={(e) => setSelectedTask(e.target.value)}
-            className="w-full px-4 py-3 bg-white border border-[rgba(31,41,55,0.08)] rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#E07A5F] text-[#1F2937]"
             disabled={isRunning}
+            className="w-full px-4 py-3 bg-white border border-[rgba(31,41,55,0.08)] rounded-2xl"
           >
             <option value="">Choose a task...</option>
             {tasks.map((task) => (
@@ -160,69 +250,8 @@ export function FocusSession() {
             ))}
           </select>
         </div>
-
-        {selectedTask ? (
-          <div className="text-[#6B7280]">
-            Working on: <span className="text-[#1F2937]">{selectedTask}</span>
-          </div>
-        ) : null}
       </Card>
 
-      {/* Settings Card */}
-      <Card padding="lg">
-        <h2 className="text-xl text-[#1F2937] mb-6">Session Settings</h2>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div>
-            <label className="block text-sm text-[#6B7280] mb-2">
-              Focus Length (minutes)
-            </label>
-            <input
-              type="number"
-              value={focusLength}
-              onChange={(e) => {
-                const val = Number(e.target.value);
-                setFocusLength(val);
-                if (!isRunning) setTimeLeft(val * 60);
-              }}
-              min="1"
-              max="60"
-              disabled={isRunning}
-              className="w-full px-4 py-3 bg-white border border-[rgba(31,41,55,0.08)] rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#E07A5F] text-[#1F2937] disabled:opacity-50"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm text-[#6B7280] mb-2">
-              Break Length (minutes)
-            </label>
-            <input
-              type="number"
-              value={breakLength}
-              onChange={(e) => setBreakLength(Number(e.target.value))}
-              min="1"
-              max="30"
-              disabled={isRunning}
-              className="w-full px-4 py-3 bg-white border border-[rgba(31,41,55,0.08)] rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#E07A5F] text-[#1F2937] disabled:opacity-50"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm text-[#6B7280] mb-2">Cycles</label>
-            <input
-              type="number"
-              value={cycles}
-              onChange={(e) => setCycles(Number(e.target.value))}
-              min="1"
-              max="10"
-              disabled={isRunning}
-              className="w-full px-4 py-3 bg-white border border-[rgba(31,41,55,0.08)] rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#E07A5F] text-[#1F2937] disabled:opacity-50"
-            />
-          </div>
-        </div>
-      </Card>
-
-      {/* Reflection Modal */}
       <Modal
         isOpen={showReflection}
         onClose={() => setShowReflection(false)}
@@ -231,38 +260,7 @@ export function FocusSession() {
         submitText="Done"
       >
         <div className="space-y-6">
-          <div>
-            <p className="text-[#6B7280] mb-4">How clear was your focus?</p>
-            <div className="flex gap-3">
-              {["Clear", "Meh", "Foggy"].map((option) => (
-                <button
-                  key={option}
-                  onClick={() => setClarity(option)}
-                  className={[
-                    "flex-1 py-3 px-4 rounded-2xl border-2 transition-all",
-                    clarity === option
-                      ? "border-[#E07A5F] bg-[#E07A5F] text-white"
-                      : "border-[rgba(31,41,55,0.08)] hover:border-[#E07A5F]",
-                  ].join(" ")}
-                >
-                  {option}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm text-[#6B7280] mb-2">
-              Optional Note
-            </label>
-            <textarea
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder="Any thoughts about this session?"
-              rows={3}
-              className="w-full px-4 py-3 bg-white border border-[rgba(31,41,55,0.08)] rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#E07A5F] resize-none"
-            />
-          </div>
+          <p>Nice work. Reflect if you'd like.</p>
         </div>
       </Modal>
     </div>

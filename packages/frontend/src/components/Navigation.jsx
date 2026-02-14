@@ -49,7 +49,7 @@ export function Navigation() {
   };
 
   return (
-    <header className="w-full border-b border-border bg-card/90 backdrop-blur-sm shadow-sm">
+    <header className="relative z-50 w-full border-b border-border bg-card/90 backdrop-blur-sm shadow-sm">
       <div className="w-full px-8 h-20 flex items-center justify-between">
         {/* LEFT */}
         <div className="flex items-center gap-10">
@@ -72,7 +72,7 @@ export function Navigation() {
         </div>
 
         {/* RIGHT: avatar + dropdown */}
-        <div className="relative" ref={menuRef}>
+        <div className="relative z-50" ref={menuRef}>
           <button
             onClick={() => setOpen((v) => !v)}
             className="w-11 h-11 rounded-full bg-secondary text-foreground grid place-items-center text-sm font-medium hover:opacity-90 transition"
@@ -83,7 +83,7 @@ export function Navigation() {
           </button>
 
           {open && (
-            <div className="absolute right-0 mt-3 w-80 bg-white rounded-2xl shadow-xl border border-[rgba(31,41,55,0.08)] overflow-hidden">
+            <div className="absolute right-0 mt-3 w-80 bg-white z-50 rounded-2xl shadow-xl border border-[rgba(31,41,55,0.08)] overflow-hidden">
               {/* header */}
               <div className="px-5 py-4">
                 <div className="text-lg font-semibold text-[#1F2937]">
