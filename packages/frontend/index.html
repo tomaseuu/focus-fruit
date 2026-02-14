@@ -1,67 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
-    <title>User</title>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="stylesheet" href="index.css" />
+    <title>Focus OS</title>
   </head>
-  <body class="user-page">
-    <nav class="navbar">
-      <a href="index.html" class="logo-link">
-        <div class="logo-container">
-          <img
-            src="focus-fruit-logo.png"
-            alt="Focus-Fruit Logo"
-            class="logo-image"
-          />
-          <span class="logo-text">FocusFruit</span>
-        </div>
-      </a>
-      <ul class="nav-list">
-        <li><a href="index.html">Home</a></li>
-      </ul>
-    </nav>
-
-    <main class="user-container">
-      <div class="user-wrapper">
-        <div class="user-left">
-          <h1>Login</h1>
-          <p>For Existing Members</p>
-          <form id="user-form">
-            <label for="name">username</label>
-            <input type="text" id="name" name="name" required />
-
-            <label for="password">password</label>
-            <input type="password" id="password" name="password" required />
-
-            <input type="submit" value="Submit" />
-          </form>
-        </div>
-
-        <div class="user-right">
-          <h1>Sign Up</h1>
-          <p>For New Members</p>
-          <form id="user-form">
-            <label for="name">username</label>
-            <input type="text" id="name" name="name" required />
-
-            <label for="password">password</label>
-            <input type="password" id="password" name="password" required />
-
-            <input type="submit" value="Submit" />
-          </form>
-        </div>
-      </div>
-    </main>
-
-    <script type="module" src="./src/main.jsx"></script>
-    <div class="three-dots">...</div>
-
-    <footer class="footer">
-      <p>
-        <a href="contact.html">contact us</a>
-      </p>
-    </footer>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
