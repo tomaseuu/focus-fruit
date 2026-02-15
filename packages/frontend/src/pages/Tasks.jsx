@@ -1,9 +1,26 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Card } from "../components/Card";
 import { Button } from "../components/Button";
 import { Input } from "../components/Input";
 import { TagChip } from "../components/TagChip";
 import { Plus, Search } from "lucide-react";
+import { apiFetch } from "../api";
+
+const DEFAULT_TASK_META = {
+  tag: "Work",
+  priority: "Low",
+  estimate: "30m",
+};
+
+function normalizeTask(t) {
+  return {
+    ...t,
+    tag: t?.tag ?? DEFAULT_TASK_META.tag,
+    priority: t?.priority ?? DEFAULT_TASK_META.priority,
+    estimate: t?.estimate ?? DEFAULT_TASK_META.estimate,
+    completed: Boolean(t?.completed),
+  };
+}
 
 export function Tasks() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -13,60 +30,13 @@ export function Tasks() {
   const [newTask, setNewTask] = useState({
     title: "",
     tag: "Work",
-    priority: "Medium",
+    priority: "Low",
     estimate: "30m",
   });
 
-  const [tasks, setTasks] = useState([
-    {
-      id: 1,
-      title: "Review project proposal",
-      tag: "Work",
-      priority: "High",
-      estimate: "60m",
-      completed: false,
-    },
-    {
-      id: 2,
-      title: "Morning meditation",
-      tag: "Health",
-      priority: "Medium",
-      estimate: "30m",
-      completed: true,
-    },
-    {
-      id: 3,
-      title: "Design mockups for landing page",
-      tag: "Creative",
-      priority: "High",
-      estimate: "60m",
-      completed: false,
-    },
-    {
-      id: 4,
-      title: "Study for exam",
-      tag: "School",
-      priority: "High",
-      estimate: "60m",
-      completed: false,
-    },
-    {
-      id: 5,
-      title: "Team standup meeting",
-      tag: "Work",
-      priority: "Low",
-      estimate: "30m",
-      completed: false,
-    },
-    {
-      id: 6,
-      title: "Write blog post",
-      tag: "Creative",
-      priority: "Medium",
-      estimate: "60m",
-      completed: false,
-    },
-  ]);
+  const [tasks, setTasks] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState(null);
 
   const tags = useMemo(
     () => ["All", "School", "Work", "Creative", "Health"],
@@ -81,42 +51,85 @@ export function Tasks() {
 
   const remainingCount = tasks.filter((t) => !t.completed).length;
 
-  const handleAddTask = () => {
-    if (!newTask.title.trim()) return;
+  const handleAddTask = async () => {
+    const title = newTask.title.trim();
+    if (!title) return;
 
-    const task = {
-      id: Date.now(),
-      title: newTask.title.trim(),
-      tag: newTask.tag,
-      priority: newTask.priority,
-      estimate: newTask.estimate,
-      completed: false,
-    };
+    try {
+      const created = await apiFetch("/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          title,
+          tag: newTask.tag,
+          priority: newTask.priority,
+          estimate: newTask.estimate,
+        }),
+      });
 
-    setTasks([task, ...tasks]);
-    setNewTask({ title: "", tag: "Work", priority: "Medium", estimate: "30m" });
-    setShowAddTask(false);
+      setTasks((prev) => [normalizeTask(created), ...prev]);
+      setNewTask({ title: "", tag: "Work", priority: "Low", estimate: "30m" });
+      setShowAddTask(false);
+    } catch (e) {
+      alert(e?.message ?? "Failed to create task");
+    }
   };
 
-  const toggleComplete = (id) => {
-    setTasks(
-      tasks.map((task) =>
-        task.id === id ? { ...task, completed: !task.completed } : task,
-      ),
-    );
+  const toggleComplete = async (id) => {
+    try {
+      const updated = await apiFetch(`/tasks/${id}`, { method: "PATCH" });
+      setTasks((prev) =>
+        prev.map((t) => (t.id === id ? normalizeTask(updated) : t)),
+      );
+    } catch (e) {
+      alert(e?.message ?? "Failed to update task");
+    }
   };
 
-  const deleteTask = (id) => {
-    setTasks(tasks.filter((task) => task.id !== id));
+  const deleteTask = async (id) => {
+    try {
+      await apiFetch(`/tasks/${id}`, { method: "DELETE" });
+      setTasks((prev) => prev.filter((t) => t.id !== id));
+    } catch (e) {
+      alert(e?.message ?? "Failed to delete task");
+    }
   };
 
   const filteredTasks = tasks.filter((task) => {
-    const matchesFilter = activeFilter === "All" || task.tag === activeFilter;
-    const matchesSearch = task.title
-      .toLowerCase()
-      .includes(searchQuery.toLowerCase());
+    const tag = task.tag ?? DEFAULT_TASK_META.tag;
+    const matchesFilter = activeFilter === "All" || tag === activeFilter;
+
+    const title = (task.title ?? "").toLowerCase();
+    const matchesSearch = title.includes(searchQuery.toLowerCase());
+
     return matchesFilter && matchesSearch;
   });
+
+  useEffect(() => {
+    let alive = true;
+
+    async function load() {
+      setLoading(true);
+      setErr(null);
+      try {
+        const data = await apiFetch("/tasks");
+        if (!alive) return;
+
+        const list = Array.isArray(data) ? data : [];
+        setTasks(list.map(normalizeTask));
+      } catch (e) {
+        if (!alive) return;
+        setErr(e?.message ?? "Failed to load tasks");
+      } finally {
+        if (!alive) return;
+        setLoading(false);
+      }
+    }
+
+    load();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
@@ -127,7 +140,13 @@ export function Tasks() {
           <p className="text-[#6B7280]">{remainingCount} tasks remaining</p>
         </div>
 
-        <Button variant="primary" onClick={() => setShowAddTask((v) => !v)}>
+        <Button
+          variant="primary"
+          onClick={() => {
+            setShowAddTask((v) => !v);
+            setErr(null);
+          }}
+        >
           <Plus className="w-5 h-5 mr-2" />
           Add Task
         </Button>
@@ -243,7 +262,11 @@ export function Tasks() {
       {/* Tasks List */}
       <Card padding="md">
         <div className="space-y-2">
-          {filteredTasks.length === 0 ? (
+          {loading ? (
+            <div className="text-center py-12 text-[#6B7280]">Loading…</div>
+          ) : err ? (
+            <div className="text-center py-12 text-red-600">{err}</div>
+          ) : filteredTasks.length === 0 ? (
             <div className="text-center py-12 text-[#6B7280]">
               No tasks found
             </div>

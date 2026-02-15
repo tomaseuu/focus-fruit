@@ -227,6 +227,108 @@ app.get("/analytics/summary", async (req, res) => {
   }
 });
 
+// recent sessions (last 6)
+app.get("/sessions/recent", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `
+      SELECT
+        fs.started_at,
+        fs.duration_minutes,
+        t.title AS task_title
+      FROM focus_sessions fs
+      LEFT JOIN tasks t ON t.id = fs.task_id
+      WHERE fs.user_id = $1
+        AND fs.ended_at IS NOT NULL
+      ORDER BY fs.started_at DESC
+      LIMIT 6
+      `,
+      [TEST_USER_ID],
+    );
+
+    const rows = result.rows;
+
+    const out = rows.map((r) => {
+      const started = r.started_at ? new Date(r.started_at) : null;
+
+      // quick “time” label (Today / Yesterday / date)
+      let time = "—";
+      if (started) {
+        const d = new Date(started);
+        const now = new Date();
+
+        const startDay = new Date(d);
+        startDay.setHours(0, 0, 0, 0);
+
+        const nowDay = new Date(now);
+        nowDay.setHours(0, 0, 0, 0);
+
+        const diffDays = Math.round(
+          (nowDay.getTime() - startDay.getTime()) / (1000 * 60 * 60 * 24),
+        );
+
+        if (diffDays === 0)
+          time = d.toLocaleTimeString([], {
+            hour: "numeric",
+            minute: "2-digit",
+          });
+        else if (diffDays === 1) time = "Yesterday";
+        else time = d.toLocaleDateString();
+      }
+
+      const mins = Math.round(Number(r.duration_minutes || 0));
+      return {
+        time,
+        task: r.task_title || "Focus Session",
+        duration: `${mins} min`,
+      };
+    });
+
+    res.json(out);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch recent sessions" });
+  }
+});
+
+app.post("/sessions/reflect", async (req, res) => {
+  try {
+    const { clarity, note } = req.body;
+
+    const active = await pool.query(
+      `
+      SELECT id
+      FROM focus_sessions
+      WHERE user_id = $1 AND ended_at IS NOT NULL
+      ORDER BY ended_at DESC
+      LIMIT 1
+      `,
+      [TEST_USER_ID],
+    );
+
+    if (active.rows.length === 0) {
+      return res.status(400).json({ error: "No recent session to reflect on" });
+    }
+
+    const sessionId = active.rows[0].id;
+
+    const result = await pool.query(
+      `
+      UPDATE focus_sessions
+      SET clarity = $1, note = $2
+      WHERE id = $3
+      RETURNING *
+      `,
+      [clarity || null, note || null, sessionId],
+    );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to save reflection" });
+  }
+});
+
 app.get("/analytics/daily", async (req, res) => {
   try {
     const result = await pool.query(
@@ -236,7 +338,7 @@ app.get("/analytics/daily", async (req, res) => {
         COALESCE(SUM(duration_minutes), 0) AS focus_minutes_today
       FROM focus_sessions
       WHERE user_id = $1
-        AND DATE(created_at) = CURRENT_DATE
+        AND DATE(started_at) = CURRENT_DATE
       `,
       [TEST_USER_ID],
     );
@@ -257,7 +359,7 @@ app.get("/analytics/streak", async (req, res) => {
   try {
     const result = await pool.query(
       `
-      SELECT DISTINCT DATE(created_at) AS day
+      SELECT DISTINCT DATE(started_at) AS day
       FROM focus_sessions
       WHERE user_id = $1
       ORDER BY day DESC
@@ -292,5 +394,25 @@ app.get("/analytics/streak", async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to calculate streak" });
+  }
+});
+
+app.patch("/tasks/:id/complete", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query(
+      "UPDATE tasks SET completed = true WHERE id = $1 RETURNING *",
+      [id],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Task not found" });
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to complete task" });
   }
 });
