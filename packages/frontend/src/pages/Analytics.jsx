@@ -29,58 +29,66 @@ export function Analytics() {
 
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
+  const [clarityData, setClarityData] = useState([]);
+  const [weeklyData, setWeeklyData] = useState([]);
 
-  // ====== your existing mock chart data (kept as-is) ======
-  const weeklyData = [
-    { day: "Mon", minutes: 120 },
-    { day: "Tue", minutes: 90 },
-    { day: "Wed", minutes: 150 },
-    { day: "Thu", minutes: 180 },
-    { day: "Fri", minutes: 135 },
-    { day: "Sat", minutes: 60 },
-    { day: "Sun", minutes: 75 },
-  ];
+  // // ====== your existing mock chart data (kept as-is) ======
 
-  const clarityData = [
-    { week: "Week 1", clear: 12, meh: 5, foggy: 2 },
-    { week: "Week 2", clear: 15, meh: 4, foggy: 1 },
-    { week: "Week 3", clear: 18, meh: 3, foggy: 1 },
-    { week: "Week 4", clear: 20, meh: 2, foggy: 0 },
-  ];
+  // const heatmapData = [
+  //   { day: "Mon", hours: [0, 45, 90, 120, 60, 30, 0, 0] },
+  //   { day: "Tue", hours: [0, 30, 60, 90, 75, 45, 0, 0] },
+  //   { day: "Wed", hours: [0, 60, 120, 150, 90, 30, 0, 0] },
+  //   { day: "Thu", hours: [0, 75, 135, 180, 120, 45, 0, 0] },
+  //   { day: "Fri", hours: [0, 45, 90, 135, 90, 30, 0, 0] },
+  //   { day: "Sat", hours: [0, 0, 30, 60, 30, 0, 0, 0] },
+  //   { day: "Sun", hours: [0, 0, 45, 75, 30, 0, 0, 0] },
+  // ];
 
-  const heatmapData = [
-    { day: "Mon", hours: [0, 45, 90, 120, 60, 30, 0, 0] },
-    { day: "Tue", hours: [0, 30, 60, 90, 75, 45, 0, 0] },
-    { day: "Wed", hours: [0, 60, 120, 150, 90, 30, 0, 0] },
-    { day: "Thu", hours: [0, 75, 135, 180, 120, 45, 0, 0] },
-    { day: "Fri", hours: [0, 45, 90, 135, 90, 30, 0, 0] },
-    { day: "Sat", hours: [0, 0, 30, 60, 30, 0, 0, 0] },
-    { day: "Sun", hours: [0, 0, 45, 75, 30, 0, 0, 0] },
-  ];
-
-  const getHeatmapColor = (minutes) => {
-    if (minutes === 0) return "#F2E9E4";
-    if (minutes < 60) return "#fcd5c6";
-    if (minutes < 120) return "#f4a98f";
-    if (minutes < 180) return "#E07A5F";
-    return "#c66649";
-  };
+  // const getHeatmapColor = (minutes) => {
+  //   if (minutes === 0) return "#F2E9E4";
+  //   if (minutes < 60) return "#fcd5c6";
+  //   if (minutes < 120) return "#f4a98f";
+  //   if (minutes < 180) return "#E07A5F";
+  //   return "#c66649";
+  // };
 
   // ✅ derive a couple insight values from your mock weeklyData (for now)
   const bestFocusDay = useMemo(() => {
     if (!weeklyData.length) return { day: "—", minutes: 0 };
-    return weeklyData.reduce((best, cur) =>
-      cur.minutes > best.minutes ? cur : best,
+
+    const best = weeklyData.reduce(
+      (acc, cur) =>
+        Number(cur.minutes || 0) > Number(acc.minutes || 0) ? cur : acc,
+      weeklyData[0],
     );
+
+    // label like "Mon"
+    const label = best?.day
+      ? new Date(best.day).toLocaleDateString([], { weekday: "short" })
+      : "—";
+
+    return { day: label, minutes: Number(best.minutes || 0) };
   }, [weeklyData]);
 
   // ✅ clarity score derived from mock clarityData (for now)
   const clarityScore = useMemo(() => {
-    const last = clarityData[clarityData.length - 1];
-    if (!last) return 0;
-    const total = (last.clear || 0) + (last.meh || 0) + (last.foggy || 0);
+    if (!clarityData.length) return 0;
+
+    const totals = clarityData.reduce(
+      (acc, d) => {
+        acc.clear += Number(d.clear || 0);
+        acc.meh += Number(d.meh || 0);
+        acc.foggy += Number(d.foggy || 0);
+        return acc;
+      },
+      { clear: 0, meh: 0, foggy: 0 },
+    );
+
+    const total = totals.clear + totals.meh + totals.foggy;
     if (!total) return 0;
-    return Math.round(((last.clear || 0) / total) * 100);
+
+    // "clarity score" = % of sessions labeled clear
+    return Math.round((totals.clear / total) * 100);
   }, [clarityData]);
 
   // ✅ load real stats
@@ -92,11 +100,13 @@ export function Analytics() {
       setErr(null);
 
       try {
-        const [s, d, st, r] = await Promise.all([
+        const [s, d, st, r, c, w] = await Promise.all([
           apiFetch("/analytics/summary"),
           apiFetch("/analytics/daily"),
           apiFetch("/analytics/streak"),
           apiFetch("/sessions/recent"),
+          apiFetch("/analytics/clarity"),
+          apiFetch("/analytics/weekly"),
         ]);
 
         if (!alive) return;
@@ -105,6 +115,8 @@ export function Analytics() {
         setDaily(d ?? { sessions_today: 0, focus_minutes_today: 0 });
         setStreak(Number(st?.streak ?? 0));
         setRecentSessions(Array.isArray(r) ? r : []);
+        setClarityData(Array.isArray(c) ? c : []);
+        setWeeklyData(Array.isArray(w) ? w : []);
       } catch (e) {
         if (!alive) return;
         setErr(e?.message ?? "Failed to load analytics");
@@ -193,7 +205,11 @@ export function Analytics() {
               dataKey="day"
               stroke="#6B7280"
               style={{ fontSize: "14px" }}
+              tickFormatter={(v) =>
+                new Date(v).toLocaleDateString([], { weekday: "short" })
+              }
             />
+
             <YAxis stroke="#6B7280" style={{ fontSize: "14px" }} />
             <Tooltip
               contentStyle={{
@@ -220,9 +236,15 @@ export function Analytics() {
           <LineChart data={clarityData}>
             <CartesianGrid strokeDasharray="3 3" stroke="#F2E9E4" />
             <XAxis
-              dataKey="week"
+              dataKey="day"
               stroke="#6B7280"
               style={{ fontSize: "14px" }}
+              tickFormatter={(v) =>
+                new Date(v).toLocaleDateString([], {
+                  month: "short",
+                  day: "numeric",
+                })
+              }
             />
             <YAxis stroke="#6B7280" style={{ fontSize: "14px" }} />
             <Tooltip
@@ -262,7 +284,7 @@ export function Analytics() {
       </Card>
 
       {/* Heatmap Calendar */}
-      <Card padding="lg">
+      {/* <Card padding="lg">
         <h2 className="text-xl text-[#1F2937] mb-6">Focus Heatmap</h2>
 
         <div className="overflow-x-auto">
@@ -306,7 +328,7 @@ export function Analytics() {
           </div>
           <span>More</span>
         </div>
-      </Card>
+      </Card> */}
 
       {/* ✅ Optional: show recent sessions pulled from backend */}
       <Card padding="lg">
@@ -329,22 +351,29 @@ export function Analytics() {
                   <span className="text-sm text-[#6B7280]">
                     {session.time ?? "—"}
                   </span>
-                  <span
-                    className={`text-sm px-2 py-1 rounded-full ${
-                      session.clarity === "Clear"
-                        ? "bg-green-50 text-green-700"
-                        : session.clarity === "Meh"
-                        ? "bg-yellow-50 text-yellow-700"
-                        : "bg-gray-50 text-gray-700"
-                    }`}
-                  >
-                    {session.clarity ?? "—"}
-                  </span>
+                  {session.clarity ? (
+                    <span
+                      className={`text-xs px-2 py-1 rounded-full capitalize ${
+                        session.clarity === "clear"
+                          ? "bg-green-50 text-green-700"
+                          : session.clarity === "meh"
+                          ? "bg-yellow-50 text-yellow-700"
+                          : "bg-gray-50 text-gray-700"
+                      }`}
+                    >
+                      {session.clarity}
+                    </span>
+                  ) : null}
                 </div>
                 <div className="text-[#1F2937] mb-1">{session.task ?? "—"}</div>
                 <div className="text-sm text-[#6B7280]">
                   {session.duration ?? "—"}
                 </div>
+                {session.note ? (
+                  <div className="text-sm text-[#6B7280] mt-2 overflow-hidden text-ellipsis whitespace-nowrap">
+                    “{session.note}”
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>

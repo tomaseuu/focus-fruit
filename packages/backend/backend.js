@@ -140,6 +140,7 @@ app.get("/sessions/active", async (req, res) => {
       FROM focus_sessions
       WHERE user_id = $1
         AND ended_at IS NULL
+      ORDER BY started_at DESC
       LIMIT 1
       `,
       [TEST_USER_ID],
@@ -211,6 +212,7 @@ app.get("/analytics/summary", async (req, res) => {
         COALESCE(SUM(duration_minutes), 0) AS total_focus_minutes
       FROM focus_sessions
       WHERE user_id = $1
+        AND ended_at IS NOT NULL
       `,
       [TEST_USER_ID],
     );
@@ -236,6 +238,7 @@ app.get("/sessions/recent", async (req, res) => {
         fs.started_at,
         fs.duration_minutes,
         fs.clarity,
+        fs.note,
         t.title AS task_title
       FROM focus_sessions fs
       LEFT JOIN tasks t ON t.id = fs.task_id
@@ -283,6 +286,7 @@ app.get("/sessions/recent", async (req, res) => {
         task: r.task_title || "Focus Session",
         duration: `${mins} min`,
         clarity: r.clarity || null,
+        note: r.note || null,
       };
     });
 
@@ -346,6 +350,7 @@ app.get("/analytics/daily", async (req, res) => {
         COALESCE(SUM(duration_minutes), 0) AS focus_minutes_today
       FROM focus_sessions
       WHERE user_id = $1
+        AND ended_at IS NOT NULL
         AND DATE(started_at) = CURRENT_DATE
       `,
       [TEST_USER_ID],
@@ -370,6 +375,7 @@ app.get("/analytics/streak", async (req, res) => {
       SELECT DISTINCT DATE(started_at) AS day
       FROM focus_sessions
       WHERE user_id = $1
+        AND ended_at IS NOT NULL
       ORDER BY day DESC
       `,
       [TEST_USER_ID],
@@ -402,6 +408,71 @@ app.get("/analytics/streak", async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to calculate streak" });
+  }
+});
+
+// clarity breakdown over last 30 days
+app.get("/analytics/clarity", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `
+      SELECT
+        DATE(started_at) AS day,
+        SUM(CASE WHEN clarity = 'clear' THEN 1 ELSE 0 END) AS clear,
+        SUM(CASE WHEN clarity = 'meh' THEN 1 ELSE 0 END) AS meh,
+        SUM(CASE WHEN clarity = 'foggy' THEN 1 ELSE 0 END) AS foggy
+      FROM focus_sessions
+      WHERE user_id = $1
+        AND ended_at IS NOT NULL
+        AND started_at >= NOW() - INTERVAL '30 days'
+        AND clarity IS NOT NULL
+      GROUP BY day
+      ORDER BY day ASC
+      `,
+      [TEST_USER_ID],
+    );
+
+    res.json(
+      result.rows.map((r) => ({
+        day: r.day, // YYYY-MM-DD
+        clear: Number(r.clear),
+        meh: Number(r.meh),
+        foggy: Number(r.foggy),
+      })),
+    );
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch clarity analytics" });
+  }
+});
+
+// minutes per day over last 7 days
+app.get("/analytics/weekly", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `
+      SELECT
+        DATE(started_at) AS day,
+        COALESCE(SUM(duration_minutes), 0) AS minutes
+      FROM focus_sessions
+      WHERE user_id = $1
+        AND ended_at IS NOT NULL
+        AND started_at >= NOW() - INTERVAL '7 days'
+      GROUP BY day
+      ORDER BY day ASC
+      `,
+      [TEST_USER_ID],
+    );
+
+    res.json(
+      result.rows.map((r) => ({
+        day: r.day, // YYYY-MM-DD
+        minutes: Math.round(Number(r.minutes)),
+      })),
+    );
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch weekly analytics" });
   }
 });
 

@@ -27,7 +27,13 @@ export function Dashboard() {
 
   // ✅ hero timer (seconds)
   const [heroTimeLeft, setHeroTimeLeft] = useState(25 * 60);
-  const FOCUS_SECONDS = 25 * 60;
+
+  const getFocusSeconds = () => {
+    const raw = localStorage.getItem("focusLengthMinutes");
+    const m = Number.parseInt(raw ?? "25", 10);
+    const safe = Number.isFinite(m) ? Math.min(240, Math.max(1, m)) : 25;
+    return safe * 60;
+  };
 
   const formatMMSS = (seconds) => {
     const s = Math.max(0, Number(seconds) || 0);
@@ -124,29 +130,39 @@ export function Dashboard() {
 
   // ✅ Hero countdown based on activeSession.started_at
   useEffect(() => {
-    // no active session -> show default block
     if (!activeSession?.started_at) {
-      setHeroTimeLeft(FOCUS_SECONDS);
+      setHeroTimeLeft(getFocusSeconds());
       return;
     }
 
     function computeRemaining() {
       const startedStr = activeSession.started_at;
-
-      // handle timestamps without Z like your FocusSession did
       const started = new Date(
         startedStr.endsWith("Z") ? startedStr : `${startedStr}Z`,
       );
 
       const now = new Date();
       const elapsed = Math.floor((now.getTime() - started.getTime()) / 1000);
-      const remaining = Math.max(0, FOCUS_SECONDS - Math.max(0, elapsed));
+
+      const total = getFocusSeconds(); // ✅ match FocusSession length
+      const remaining = Math.max(0, total - Math.max(0, elapsed));
+
       setHeroTimeLeft(remaining);
     }
 
     computeRemaining();
     const id = setInterval(computeRemaining, 1000);
-    return () => clearInterval(id);
+
+    // ✅ if you change focusLength in another tab/page, dashboard updates too
+    const onStorage = (e) => {
+      if (e.key === "focusLengthMinutes") computeRemaining();
+    };
+    window.addEventListener("storage", onStorage);
+
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("storage", onStorage);
+    };
   }, [activeSession]);
 
   return (
@@ -197,7 +213,9 @@ export function Dashboard() {
 
           <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-8 text-center">
             <div className="text-6xl mb-2">
-              {activeSession ? formatMMSS(heroTimeLeft) : "25:00"}
+              {activeSession
+                ? formatMMSS(heroTimeLeft)
+                : formatMMSS(getFocusSeconds())}
             </div>
             <div className="text-white/80">
               {activeSession ? "Time left" : "Next focus block"}
@@ -323,22 +341,29 @@ export function Dashboard() {
                     <span className="text-sm text-[#6B7280]">
                       {session.time}
                     </span>
-                    <span
-                      className={`text-sm px-2 py-1 rounded-full ${
-                        session.clarity === "Clear"
-                          ? "bg-green-50 text-green-700"
-                          : session.clarity === "Meh"
-                          ? "bg-yellow-50 text-yellow-700"
-                          : "bg-gray-50 text-gray-700"
-                      }`}
-                    >
-                      {session.clarity}
-                    </span>
+                    {session.clarity ? (
+                      <span
+                        className={`text-xs px-2 py-1 rounded-full capitalize ${
+                          session.clarity === "clear"
+                            ? "bg-green-50 text-green-700"
+                            : session.clarity === "meh"
+                            ? "bg-yellow-50 text-yellow-700"
+                            : "bg-gray-50 text-gray-700"
+                        }`}
+                      >
+                        {session.clarity}
+                      </span>
+                    ) : null}
                   </div>
                   <div className="text-[#1F2937] mb-1">{session.task}</div>
                   <div className="text-sm text-[#6B7280]">
                     {session.duration}
                   </div>
+                  {session.note ? (
+                    <div className="text-sm text-[#6B7280] mt-2 line-clamp-2">
+                      “{session.note}”
+                    </div>
+                  ) : null}
                 </div>
               ))
             )}
