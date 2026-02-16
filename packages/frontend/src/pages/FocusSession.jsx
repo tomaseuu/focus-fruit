@@ -260,11 +260,22 @@ export function FocusSession() {
     setTimeLeft(Math.max(1, focusLength * 60));
   };
 
-  const handleEndSession = () => {
-    setShowReflection(false);
-    setClarity("");
-    setNote("");
-    setTimeLeft(Math.max(1, focusLength * 60));
+  const handleEndSession = async () => {
+    if (!clarity) return;
+    try {
+      await apiFetch("/sessions/reflect", {
+        method: "POST",
+        body: JSON.stringify({ clarity, note }),
+      });
+    } catch (err) {
+      console.error(err);
+      // don't block UX if reflection save fails
+    } finally {
+      setShowReflection(false);
+      setClarity("");
+      setNote("");
+      setTimeLeft(Math.max(1, focusLength * 60));
+    }
   };
 
   const total = focusLength * 60;
@@ -452,8 +463,46 @@ export function FocusSession() {
         onSubmit={handleEndSession}
         submitText="Done"
       >
-        <div className="space-y-6">
-          <p>Nice work. Reflect if you'd like.</p>
+        <div className="space-y-5">
+          <div>
+            <p className="text-sm text-[#6B7280] mb-2">
+              How clear did you feel?
+            </p>
+            <div className="flex gap-2">
+              {[
+                { key: "clear", label: "Clear" },
+                { key: "meh", label: "Meh" },
+                { key: "foggy", label: "Foggy" },
+              ].map((c) => (
+                <button
+                  key={c.key}
+                  type="button"
+                  onClick={() => setClarity(c.key)}
+                  className={[
+                    "px-4 py-2 rounded-xl border text-sm transition",
+                    clarity === c.key
+                      ? "bg-[#E07A5F] text-white border-[#E07A5F]"
+                      : "bg-white text-[#1F2937] border-[rgba(31,41,55,0.12)] hover:bg-[#FAF7F2]",
+                  ].join(" ")}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="text-sm text-[#6B7280] mb-2 block">
+              Note (optional)
+            </label>
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              rows={4}
+              placeholder="What went well? What distracted you?"
+              className="w-full px-4 py-3 bg-white border border-[rgba(31,41,55,0.12)] rounded-2xl text-sm"
+            />
+          </div>
         </div>
       </Modal>
     </div>

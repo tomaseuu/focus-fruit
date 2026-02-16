@@ -235,6 +235,7 @@ app.get("/sessions/recent", async (req, res) => {
       SELECT
         fs.started_at,
         fs.duration_minutes,
+        fs.clarity,
         t.title AS task_title
       FROM focus_sessions fs
       LEFT JOIN tasks t ON t.id = fs.task_id
@@ -281,6 +282,7 @@ app.get("/sessions/recent", async (req, res) => {
         time,
         task: r.task_title || "Focus Session",
         duration: `${mins} min`,
+        clarity: r.clarity || null,
       };
     });
 
@@ -294,6 +296,12 @@ app.get("/sessions/recent", async (req, res) => {
 app.post("/sessions/reflect", async (req, res) => {
   try {
     const { clarity, note } = req.body;
+
+    const allowedClarity = ["clear", "meh", "foggy"];
+
+    if (clarity && !allowedClarity.includes(clarity)) {
+      return res.status(400).json({ error: "Invalid clarity value" });
+    }
 
     const active = await pool.query(
       `
