@@ -14,8 +14,45 @@ import { Settings } from "./pages/Settings";
 import { SignIn } from "./pages/SignIn";
 import { SignUp } from "./pages/SignUp";
 
+import { useEffect, useState } from "react";
+import { supabase } from "./supabaseClient"; // adjust path if needed
+
+function RequireAuth({ children }) {
+  const [loading, setLoading] = useState(true);
+  const [authed, setAuthed] = useState(false);
+
+  useEffect(() => {
+    async function boot() {
+      const { data } = await supabase.auth.getSession();
+      console.log("SESSION:", data); // ✅ test log
+      setAuthed(!!data.session);
+      setLoading(false);
+    }
+
+    boot();
+
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthed(!!session);
+      setLoading(false);
+    });
+
+    return () => sub.subscription.unsubscribe();
+  }, []);
+
+  if (loading) return null;
+  if (!authed) return <Navigate to="/signin" replace />;
+
+  return children;
+}
+
 function AppShell() {
   const location = useLocation();
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      console.log("SESSION:", data.session);
+    });
+  }, []);
+
   const isAuthPage =
     location.pathname === "/signin" || location.pathname === "/signup";
 
@@ -27,11 +64,50 @@ function AppShell() {
         <Route path="/signin" element={<SignIn />} />
         <Route path="/signup" element={<SignUp />} />
 
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/focus" element={<FocusSession />} />
-        <Route path="/tasks" element={<Tasks />} />
-        <Route path="/analytics" element={<Analytics />} />
-        <Route path="/settings" element={<Settings />} />
+        <Route
+          path="/"
+          element={
+            <RequireAuth>
+              <Dashboard />
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/focus"
+          element={
+            <RequireAuth>
+              <FocusSession />
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/tasks"
+          element={
+            <RequireAuth>
+              <Tasks />
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/analytics"
+          element={
+            <RequireAuth>
+              <Analytics />
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/settings"
+          element={
+            <RequireAuth>
+              <Settings />
+            </RequireAuth>
+          }
+        />
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

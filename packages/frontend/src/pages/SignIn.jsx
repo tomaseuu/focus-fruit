@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Button } from "../components/Button";
 import { Modal } from "../components/Modal";
 import { Mail, Lock, Chrome } from "lucide-react";
+import { supabase } from "../supabaseClient";
 
 export function SignIn() {
   const nav = useNavigate();
@@ -12,11 +13,20 @@ export function SignIn() {
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [resetEmail, setResetEmail] = useState("");
 
-  const handleSignIn = (e) => {
+  const handleSignIn = async (e) => {
     e.preventDefault();
-    // TODO: replace with real auth later
-    console.log("Sign in:", { email, password });
-    nav("/"); // go to dashboard
+
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    nav("/");
   };
 
   const handleGoogleSignIn = () => {

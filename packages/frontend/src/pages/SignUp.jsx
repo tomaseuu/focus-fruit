@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "../components/Button";
 import { Mail, Lock, User, Chrome } from "lucide-react";
+import { supabase } from "../supabaseClient";
 
 export function SignUp() {
   const nav = useNavigate();
@@ -12,7 +13,7 @@ export function SignUp() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
 
-  const handleSignUp = (e) => {
+  const handleSignUp = async (e) => {
     e.preventDefault();
 
     if (password !== confirmPassword) {
@@ -25,9 +26,23 @@ export function SignUp() {
     }
 
     setPasswordError("");
-    // TODO: replace with real auth later
-    console.log("Sign up:", { name, email, password });
-    nav("/signin"); // after sign up, go sign in
+
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { name }, // saves name in user metadata
+      },
+    });
+
+    if (error) {
+      setPasswordError(error.message);
+      return;
+    }
+
+    // If email confirmations are ON, session might be null until confirmed.
+    // We'll send them to sign in either way.
+    nav("/signin");
   };
 
   const handleGoogleSignUp = () => {

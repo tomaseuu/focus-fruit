@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import { pool } from "./db.js";
+import { requireUser } from "./requireUser.js";
 
 const app = express();
 const port = 8000;
@@ -18,18 +19,17 @@ app.get("/health", (req, res) => {
   res.json({ ok: true });
 });
 
-app.listen(port, () => {
-  console.log(`Backend listening at http://localhost:${port}`);
-});
+app.use(requireUser);
 
-/* tasks */
-const TEST_USER_ID = "8e889881-5afc-4439-b36a-b196c304875c";
+app.get("/me", (req, res) => {
+  res.json({ id: req.user.id, email: req.user.email });
+});
 
 app.get("/tasks", async (req, res) => {
   try {
     const result = await pool.query(
       "SELECT * FROM tasks WHERE user_id = $1 ORDER BY created_at DESC",
-      [TEST_USER_ID],
+      [req.user.id],
     );
 
     res.json(result.rows);
@@ -49,7 +49,7 @@ app.post("/tasks", async (req, res) => {
 
     const result = await pool.query(
       "INSERT INTO tasks (title, user_id) VALUES ($1, $2) RETURNING *",
-      [title, TEST_USER_ID],
+      [title, req.user.id],
     );
 
     res.status(201).json(result.rows[0]);
@@ -64,8 +64,13 @@ app.patch("/tasks/:id", async (req, res) => {
     const { id } = req.params;
 
     const result = await pool.query(
-      "UPDATE tasks SET completed = NOT completed WHERE id = $1 RETURNING *",
-      [id],
+      `
+  UPDATE tasks
+  SET completed = NOT completed
+  WHERE id = $1 AND user_id = $2
+  RETURNING *
+  `,
+      [id, req.user.id],
     );
 
     if (result.rows.length === 0) {
@@ -83,7 +88,18 @@ app.delete("/tasks/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
-    await pool.query("DELETE FROM tasks WHERE id = $1", [id]);
+    const result = await pool.query(
+      `
+  DELETE FROM tasks
+  WHERE id = $1 AND user_id = $2
+  RETURNING id
+  `,
+      [id, req.user.id],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Task not found" });
+    }
 
     res.json({ success: true });
   } catch (err) {
@@ -96,7 +112,16 @@ app.post("/sessions/start", async (req, res) => {
   try {
     const { task_id } = req.body;
 
-    // 🔒 Check for active session
+    if (task_id) {
+      const taskCheck = await pool.query(
+        "SELECT id FROM tasks WHERE id = $1 AND user_id = $2",
+        [task_id, req.user.id],
+      );
+
+      if (taskCheck.rows.length === 0) {
+        return res.status(403).json({ error: "Task does not belong to user" });
+      }
+    }
     const activeCheck = await pool.query(
       `
     SELECT id FROM focus_sessions
@@ -106,7 +131,7 @@ app.post("/sessions/start", async (req, res) => {
     LIMIT 1
 
       `,
-      [TEST_USER_ID],
+      [req.user.id],
     );
 
     if (activeCheck.rows.length > 0) {
@@ -122,7 +147,7 @@ app.post("/sessions/start", async (req, res) => {
       VALUES ($1, $2, NOW())
       RETURNING *
       `,
-      [TEST_USER_ID, task_id || null],
+      [req.user.id, task_id || null],
     );
 
     res.status(201).json(result.rows[0]);
@@ -143,7 +168,7 @@ app.get("/sessions/active", async (req, res) => {
       ORDER BY started_at DESC
       LIMIT 1
       `,
-      [TEST_USER_ID],
+      [req.user.id],
     );
 
     if (result.rows.length === 0) {
@@ -172,7 +197,7 @@ app.post("/sessions/end", async (req, res) => {
       ORDER BY started_at DESC
       LIMIT 1
       `,
-      [TEST_USER_ID],
+      [req.user.id],
     );
 
     if (activeSession.rows.length === 0) {
@@ -186,15 +211,19 @@ app.post("/sessions/end", async (req, res) => {
     // 2️⃣ End it
     const result = await pool.query(
       `
-      UPDATE focus_sessions
-      SET
-        ended_at = NOW(),
-        duration_minutes = EXTRACT(EPOCH FROM (NOW() - started_at)) / 60
-      WHERE id = $1
-      RETURNING *
-      `,
-      [sessionId],
+  UPDATE focus_sessions
+  SET
+    ended_at = NOW(),
+    duration_minutes = EXTRACT(EPOCH FROM (NOW() - started_at)) / 60
+  WHERE id = $1 AND user_id = $2
+  RETURNING *
+  `,
+      [sessionId, req.user.id],
     );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Active session not found" });
+    }
 
     res.json(result.rows[0]);
   } catch (err) {
@@ -214,7 +243,7 @@ app.get("/analytics/summary", async (req, res) => {
       WHERE user_id = $1
         AND ended_at IS NOT NULL
       `,
-      [TEST_USER_ID],
+      [req.user.id],
     );
 
     const row = result.rows[0];
@@ -247,7 +276,7 @@ app.get("/sessions/recent", async (req, res) => {
       ORDER BY fs.started_at DESC
       LIMIT 6
       `,
-      [TEST_USER_ID],
+      [req.user.id],
     );
 
     const rows = result.rows;
@@ -315,7 +344,7 @@ app.post("/sessions/reflect", async (req, res) => {
       ORDER BY ended_at DESC
       LIMIT 1
       `,
-      [TEST_USER_ID],
+      [req.user.id],
     );
 
     if (active.rows.length === 0) {
@@ -326,12 +355,12 @@ app.post("/sessions/reflect", async (req, res) => {
 
     const result = await pool.query(
       `
-      UPDATE focus_sessions
-      SET clarity = $1, note = $2
-      WHERE id = $3
-      RETURNING *
-      `,
-      [clarity || null, note || null, sessionId],
+  UPDATE focus_sessions
+  SET clarity = $1, note = $2
+  WHERE id = $3 AND user_id = $4
+  RETURNING *
+  `,
+      [clarity || null, note || null, sessionId, req.user.id],
     );
 
     res.json(result.rows[0]);
@@ -353,7 +382,7 @@ app.get("/analytics/daily", async (req, res) => {
         AND ended_at IS NOT NULL
         AND DATE(started_at) = CURRENT_DATE
       `,
-      [TEST_USER_ID],
+      [req.user.id],
     );
 
     const row = result.rows[0];
@@ -378,7 +407,7 @@ app.get("/analytics/streak", async (req, res) => {
         AND ended_at IS NOT NULL
       ORDER BY day DESC
       `,
-      [TEST_USER_ID],
+      [req.user.id],
     );
 
     const days = result.rows.map((r) => r.day);
@@ -429,7 +458,7 @@ app.get("/analytics/clarity", async (req, res) => {
       GROUP BY day
       ORDER BY day ASC
       `,
-      [TEST_USER_ID],
+      [req.user.id],
     );
 
     res.json(
@@ -461,7 +490,7 @@ app.get("/analytics/weekly", async (req, res) => {
       GROUP BY day
       ORDER BY day ASC
       `,
-      [TEST_USER_ID],
+      [req.user.id],
     );
 
     res.json(
@@ -481,8 +510,13 @@ app.patch("/tasks/:id/complete", async (req, res) => {
     const { id } = req.params;
 
     const result = await pool.query(
-      "UPDATE tasks SET completed = true WHERE id = $1 RETURNING *",
-      [id],
+      `
+  UPDATE tasks
+  SET completed = true
+  WHERE id = $1 AND user_id = $2
+  RETURNING *
+  `,
+      [id, req.user.id],
     );
 
     if (result.rows.length === 0) {
@@ -494,4 +528,8 @@ app.patch("/tasks/:id/complete", async (req, res) => {
     console.error(err);
     res.status(500).json({ error: "Failed to complete task" });
   }
+});
+
+app.listen(port, () => {
+  console.log(`Backend listening at http://localhost:${port}`);
 });
