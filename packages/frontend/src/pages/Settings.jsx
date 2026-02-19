@@ -167,7 +167,7 @@ export function Settings() {
             <Input label="Email" type="email" value={email} disabled />
 
             <Input
-              label="Display name (Focus OS)"
+              label="Display name (Focus Fruit)"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               placeholder="Optional (ex: Joe)"

@@ -49,12 +49,17 @@ app.get("/tasks", async (req, res) => {
 
 app.post("/tasks", async (req, res) => {
   try {
-    const { title } = req.body;
+    const { title, tag, priority, estimate } = req.body;
+
     if (!title) return res.status(400).json({ error: "Title is required" });
 
     const result = await pool.query(
-      "INSERT INTO tasks (title, user_id) VALUES ($1, $2) RETURNING *",
-      [title, req.user.id],
+      `
+      INSERT INTO tasks (title, tag, priority, estimate, user_id)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING *
+      `,
+      [title, tag ?? "Work", priority ?? "Low", estimate ?? "30m", req.user.id],
     );
 
     res.status(201).json(result.rows[0]);

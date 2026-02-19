@@ -81,7 +81,7 @@ export function Navigation() {
               F
             </div>
             <div className="text-xl font-normal tracking-tight text-foreground">
-              Focus OS
+              Focus Fruit
             </div>
           </Link>
 
