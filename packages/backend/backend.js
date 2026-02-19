@@ -3,17 +3,29 @@ import cors from "cors";
 import { pool } from "./db.js";
 import { requireUser } from "./requireUser.js";
 import { ensureUserRow } from "./ensureUserRow.js";
+
 const app = express();
-const port = 8000;
+const port = process.env.PORT || 8000;
+
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:3000",
+  process.env.FRONTEND_URL,
+].filter(Boolean);
 
 const corsOptions = {
-  origin: ["http://localhost:5173", "http://localhost:3000"],
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true); // curl/postman
+    if (allowedOrigins.includes(origin)) return cb(null, true);
+    return cb(new Error(`CORS blocked: ${origin}`));
+  },
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
 };
 
 app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 app.use(express.json());
 
 app.get("/health", (req, res) => res.json({ ok: true }));
@@ -21,13 +33,13 @@ app.get("/health", (req, res) => res.json({ ok: true }));
 app.use(requireUser);
 app.use(ensureUserRow);
 
+/* tasks */
 app.get("/tasks", async (req, res) => {
   try {
     const result = await pool.query(
       "SELECT * FROM tasks WHERE user_id = $1 ORDER BY created_at DESC",
       [req.user.id],
     );
-
     res.json(result.rows);
   } catch (err) {
     console.error(err);
@@ -38,10 +50,7 @@ app.get("/tasks", async (req, res) => {
 app.post("/tasks", async (req, res) => {
   try {
     const { title } = req.body;
-
-    if (!title) {
-      return res.status(400).json({ error: "Title is required" });
-    }
+    if (!title) return res.status(400).json({ error: "Title is required" });
 
     const result = await pool.query(
       "INSERT INTO tasks (title, user_id) VALUES ($1, $2) RETURNING *",
@@ -61,22 +70,45 @@ app.patch("/tasks/:id", async (req, res) => {
 
     const result = await pool.query(
       `
-  UPDATE tasks
-  SET completed = NOT completed
-  WHERE id = $1 AND user_id = $2
-  RETURNING *
-  `,
+      UPDATE tasks
+      SET completed = NOT completed
+      WHERE id = $1 AND user_id = $2
+      RETURNING *
+      `,
       [id, req.user.id],
     );
 
-    if (result.rows.length === 0) {
+    if (result.rows.length === 0)
       return res.status(404).json({ error: "Task not found" });
-    }
 
     res.json(result.rows[0]);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to update task" });
+  }
+});
+
+app.patch("/tasks/:id/complete", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query(
+      `
+      UPDATE tasks
+      SET completed = true
+      WHERE id = $1 AND user_id = $2
+      RETURNING *
+      `,
+      [id, req.user.id],
+    );
+
+    if (result.rows.length === 0)
+      return res.status(404).json({ error: "Task not found" });
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to complete task" });
   }
 });
 
@@ -86,16 +118,15 @@ app.delete("/tasks/:id", async (req, res) => {
 
     const result = await pool.query(
       `
-  DELETE FROM tasks
-  WHERE id = $1 AND user_id = $2
-  RETURNING id
-  `,
+      DELETE FROM tasks
+      WHERE id = $1 AND user_id = $2
+      RETURNING id
+      `,
       [id, req.user.id],
     );
 
-    if (result.rows.length === 0) {
+    if (result.rows.length === 0)
       return res.status(404).json({ error: "Task not found" });
-    }
 
     res.json({ success: true });
   } catch (err) {
@@ -104,6 +135,7 @@ app.delete("/tasks/:id", async (req, res) => {
   }
 });
 
+/* sessions */
 app.post("/sessions/start", async (req, res) => {
   try {
     const { task_id } = req.body;
@@ -113,19 +145,17 @@ app.post("/sessions/start", async (req, res) => {
         "SELECT id FROM tasks WHERE id = $1 AND user_id = $2",
         [task_id, req.user.id],
       );
-
       if (taskCheck.rows.length === 0) {
         return res.status(403).json({ error: "Task does not belong to user" });
       }
     }
+
     const activeCheck = await pool.query(
       `
-    SELECT id FROM focus_sessions
-    WHERE user_id = $1
-    AND ended_at IS NULL
-    ORDER BY started_at DESC
-    LIMIT 1
-
+      SELECT id FROM focus_sessions
+      WHERE user_id = $1 AND ended_at IS NULL
+      ORDER BY started_at DESC
+      LIMIT 1
       `,
       [req.user.id],
     );
@@ -159,22 +189,16 @@ app.get("/sessions/active", async (req, res) => {
       `
       SELECT *
       FROM focus_sessions
-      WHERE user_id = $1
-        AND ended_at IS NULL
+      WHERE user_id = $1 AND ended_at IS NULL
       ORDER BY started_at DESC
       LIMIT 1
       `,
       [req.user.id],
     );
 
-    if (result.rows.length === 0) {
-      return res.json({ active: false });
-    }
+    if (result.rows.length === 0) return res.json({ active: false });
 
-    res.json({
-      active: true,
-      session: result.rows[0],
-    });
+    res.json({ active: true, session: result.rows[0] });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to fetch active session" });
@@ -183,13 +207,11 @@ app.get("/sessions/active", async (req, res) => {
 
 app.post("/sessions/end", async (req, res) => {
   try {
-    // 1️⃣ Find active session
     const activeSession = await pool.query(
       `
       SELECT id, started_at
       FROM focus_sessions
-      WHERE user_id = $1
-        AND ended_at IS NULL
+      WHERE user_id = $1 AND ended_at IS NULL
       ORDER BY started_at DESC
       LIMIT 1
       `,
@@ -197,29 +219,22 @@ app.post("/sessions/end", async (req, res) => {
     );
 
     if (activeSession.rows.length === 0) {
-      return res.status(400).json({
-        error: "No active session to end",
-      });
+      return res.status(400).json({ error: "No active session to end" });
     }
 
     const sessionId = activeSession.rows[0].id;
 
-    // 2️⃣ End it
     const result = await pool.query(
       `
-  UPDATE focus_sessions
-  SET
-    ended_at = NOW(),
-    duration_minutes = EXTRACT(EPOCH FROM (NOW() - started_at)) / 60
-  WHERE id = $1 AND user_id = $2
-  RETURNING *
-  `,
+      UPDATE focus_sessions
+      SET
+        ended_at = NOW(),
+        duration_minutes = EXTRACT(EPOCH FROM (NOW() - started_at)) / 60
+      WHERE id = $1 AND user_id = $2
+      RETURNING *
+      `,
       [sessionId, req.user.id],
     );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: "Active session not found" });
-    }
 
     res.json(result.rows[0]);
   } catch (err) {
@@ -228,33 +243,6 @@ app.post("/sessions/end", async (req, res) => {
   }
 });
 
-app.get("/analytics/summary", async (req, res) => {
-  try {
-    const result = await pool.query(
-      `
-      SELECT
-        COUNT(*) AS total_sessions,
-        COALESCE(SUM(duration_minutes), 0) AS total_focus_minutes
-      FROM focus_sessions
-      WHERE user_id = $1
-        AND ended_at IS NOT NULL
-      `,
-      [req.user.id],
-    );
-
-    const row = result.rows[0];
-
-    res.json({
-      total_sessions: Number(row.total_sessions),
-      total_focus_minutes: Number(row.total_focus_minutes),
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Failed to fetch analytics" });
-  }
-});
-
-// recent sessions (last 6)
 app.get("/sessions/recent", async (req, res) => {
   try {
     const result = await pool.query(
@@ -267,20 +255,16 @@ app.get("/sessions/recent", async (req, res) => {
         t.title AS task_title
       FROM focus_sessions fs
       LEFT JOIN tasks t ON t.id = fs.task_id
-      WHERE fs.user_id = $1
-        AND fs.ended_at IS NOT NULL
+      WHERE fs.user_id = $1 AND fs.ended_at IS NOT NULL
       ORDER BY fs.started_at DESC
       LIMIT 6
       `,
       [req.user.id],
     );
 
-    const rows = result.rows;
-
-    const out = rows.map((r) => {
+    const out = result.rows.map((r) => {
       const started = r.started_at ? new Date(r.started_at) : null;
 
-      // quick “time” label (Today / Yesterday / date)
       let time = "—";
       if (started) {
         const d = new Date(started);
@@ -325,14 +309,13 @@ app.get("/sessions/recent", async (req, res) => {
 app.post("/sessions/reflect", async (req, res) => {
   try {
     const { clarity, note } = req.body;
-
     const allowedClarity = ["clear", "meh", "foggy"];
 
     if (clarity && !allowedClarity.includes(clarity)) {
       return res.status(400).json({ error: "Invalid clarity value" });
     }
 
-    const active = await pool.query(
+    const latestEnded = await pool.query(
       `
       SELECT id
       FROM focus_sessions
@@ -343,19 +326,19 @@ app.post("/sessions/reflect", async (req, res) => {
       [req.user.id],
     );
 
-    if (active.rows.length === 0) {
+    if (latestEnded.rows.length === 0) {
       return res.status(400).json({ error: "No recent session to reflect on" });
     }
 
-    const sessionId = active.rows[0].id;
+    const sessionId = latestEnded.rows[0].id;
 
     const result = await pool.query(
       `
-  UPDATE focus_sessions
-  SET clarity = $1, note = $2
-  WHERE id = $3 AND user_id = $4
-  RETURNING *
-  `,
+      UPDATE focus_sessions
+      SET clarity = $1, note = $2
+      WHERE id = $3 AND user_id = $4
+      RETURNING *
+      `,
       [clarity || null, note || null, sessionId, req.user.id],
     );
 
@@ -363,6 +346,32 @@ app.post("/sessions/reflect", async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to save reflection" });
+  }
+});
+
+/* analytics */
+app.get("/analytics/summary", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `
+      SELECT
+        COUNT(*) AS total_sessions,
+        COALESCE(SUM(duration_minutes), 0) AS total_focus_minutes
+      FROM focus_sessions
+      WHERE user_id = $1 AND ended_at IS NOT NULL
+      `,
+      [req.user.id],
+    );
+
+    const row = result.rows[0];
+
+    res.json({
+      total_sessions: Number(row.total_sessions),
+      total_focus_minutes: Number(row.total_focus_minutes),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch analytics" });
   }
 });
 
@@ -399,8 +408,7 @@ app.get("/analytics/streak", async (req, res) => {
       `
       SELECT DISTINCT DATE(started_at) AS day
       FROM focus_sessions
-      WHERE user_id = $1
-        AND ended_at IS NOT NULL
+      WHERE user_id = $1 AND ended_at IS NOT NULL
       ORDER BY day DESC
       `,
       [req.user.id],
@@ -408,25 +416,20 @@ app.get("/analytics/streak", async (req, res) => {
 
     const days = result.rows.map((r) => r.day);
 
-    if (days.length === 0) {
-      return res.json({ streak: 0 });
-    }
+    if (days.length === 0) return res.json({ streak: 0 });
 
     let streak = 0;
     let currentDate = new Date();
     currentDate.setHours(0, 0, 0, 0);
 
-    for (let day of days) {
+    for (const day of days) {
       const sessionDate = new Date(day);
       sessionDate.setHours(0, 0, 0, 0);
 
       const diff = (currentDate - sessionDate) / (1000 * 60 * 60 * 24);
 
-      if (diff === streak) {
-        streak++;
-      } else {
-        break;
-      }
+      if (diff === streak) streak++;
+      else break;
     }
 
     res.json({ streak });
@@ -436,7 +439,6 @@ app.get("/analytics/streak", async (req, res) => {
   }
 });
 
-// clarity breakdown over last 30 days
 app.get("/analytics/clarity", async (req, res) => {
   try {
     const result = await pool.query(
@@ -459,7 +461,7 @@ app.get("/analytics/clarity", async (req, res) => {
 
     res.json(
       result.rows.map((r) => ({
-        day: r.day, // YYYY-MM-DD
+        day: r.day,
         clear: Number(r.clear),
         meh: Number(r.meh),
         foggy: Number(r.foggy),
@@ -471,7 +473,6 @@ app.get("/analytics/clarity", async (req, res) => {
   }
 });
 
-// minutes per day over last 7 days
 app.get("/analytics/weekly", async (req, res) => {
   try {
     const result = await pool.query(
@@ -491,7 +492,7 @@ app.get("/analytics/weekly", async (req, res) => {
 
     res.json(
       result.rows.map((r) => ({
-        day: r.day, // YYYY-MM-DD
+        day: r.day,
         minutes: Math.round(Number(r.minutes)),
       })),
     );
@@ -501,109 +502,111 @@ app.get("/analytics/weekly", async (req, res) => {
   }
 });
 
-app.patch("/tasks/:id/complete", async (req, res) => {
+/* profile */
+app.get("/me", async (req, res) => {
   try {
-    const { id } = req.params;
+    const userId = req.user.id;
+
+    const result = await pool.query(
+      `SELECT id, email, name FROM users WHERE id = $1`,
+      [userId],
+    );
+
+    res.json(
+      result.rows[0] ?? { id: userId, email: req.user.email, name: null },
+    );
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch profile" });
+  }
+});
+
+app.patch("/me", async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { name } = req.body;
 
     const result = await pool.query(
       `
-  UPDATE tasks
-  SET completed = true
-  WHERE id = $1 AND user_id = $2
-  RETURNING *
-  `,
-      [id, req.user.id],
+      UPDATE users
+      SET name = $1
+      WHERE id = $2
+      RETURNING id, email, name
+      `,
+      [name ?? null, userId],
     );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: "Task not found" });
-    }
 
     res.json(result.rows[0]);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Failed to complete task" });
+    res.status(500).json({ error: "Failed to update profile" });
   }
 });
 
-// profile
-app.get("/me", async (req, res) => {
-  const userId = req.user.id;
-
-  const result = await pool.query(
-    `SELECT id, email, name FROM users WHERE id = $1`,
-    [userId],
-  );
-
-  res.json(result.rows[0]); // { id, email, name }
-});
-
-app.patch("/me", async (req, res) => {
-  const userId = req.user.id;
-  const { name } = req.body;
-
-  const result = await pool.query(
-    `
-    UPDATE users
-    SET name = $1
-    WHERE id = $2
-    RETURNING id, email, name
-    `,
-    [name ?? null, userId],
-  );
-
-  res.json(result.rows[0]);
-});
-
-// settings
+/* settings */
 app.get("/settings", async (req, res) => {
-  const userId = req.user.id;
+  try {
+    const userId = req.user.id;
 
-  const result = await pool.query(
-    `
-    SELECT sound_enabled, notifications_enabled, theme
-    FROM user_settings
-    WHERE user_id = $1
-    `,
-    [userId],
-  );
+    const result = await pool.query(
+      `
+      SELECT sound_enabled, notifications_enabled, theme
+      FROM user_settings
+      WHERE user_id = $1
+      `,
+      [userId],
+    );
 
-  // return defaults if missing
-  res.json(
-    result.rows[0] ?? {
-      sound_enabled: true,
-      notifications_enabled: true,
-      theme: "light",
-    },
-  );
+    res.json(
+      result.rows[0] ?? {
+        sound_enabled: true,
+        notifications_enabled: true,
+        theme: "light",
+      },
+    );
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch settings" });
+  }
 });
 
 app.patch("/settings", async (req, res) => {
-  const userId = req.user.id;
-  const { sound_enabled, notifications_enabled, theme } = req.body;
+  try {
+    const userId = req.user.id;
+    const { sound_enabled, notifications_enabled, theme } = req.body;
 
-  const result = await pool.query(
-    `
-    UPDATE user_settings
-    SET
-      sound_enabled = COALESCE($1, sound_enabled),
-      notifications_enabled = COALESCE($2, notifications_enabled),
-      theme = COALESCE($3, theme),
-      updated_at = NOW()
-    WHERE user_id = $4
-    RETURNING sound_enabled, notifications_enabled, theme
-    `,
-    [
-      typeof sound_enabled === "boolean" ? sound_enabled : null,
-      typeof notifications_enabled === "boolean" ? notifications_enabled : null,
-      typeof theme === "string" ? theme : null,
-      userId,
-    ],
-  );
+    const result = await pool.query(
+      `
+      INSERT INTO user_settings (user_id, sound_enabled, notifications_enabled, theme)
+      VALUES ($4,
+        COALESCE($1, true),
+        COALESCE($2, true),
+        COALESCE($3, 'light')
+      )
+      ON CONFLICT (user_id) DO UPDATE SET
+        sound_enabled = COALESCE($1, user_settings.sound_enabled),
+        notifications_enabled = COALESCE($2, user_settings.notifications_enabled),
+        theme = COALESCE($3, user_settings.theme),
+        updated_at = NOW()
+      RETURNING sound_enabled, notifications_enabled, theme
+      `,
+      [
+        typeof sound_enabled === "boolean" ? sound_enabled : null,
+        typeof notifications_enabled === "boolean"
+          ? notifications_enabled
+          : null,
+        typeof theme === "string" ? theme : null,
+        userId,
+      ],
+    );
 
-  res.json(result.rows[0]);
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to save settings" });
+  }
 });
 
 app.listen(port, () => {
-  console.log(`Backend listening at http://localhost:${port}`);
+  console.log(`Backend listening on port ${port}`);
 });
