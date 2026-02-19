@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { NavLink, Link, useNavigate } from "react-router-dom";
 import { User, LogOut } from "lucide-react";
+import { supabase } from "../supabaseClient";
 
 function NavItem({ to, children }) {
   return (
@@ -26,8 +27,8 @@ export function Navigation() {
   const nav = useNavigate();
   const [open, setOpen] = useState(false);
   const menuRef = useRef(null);
+  const [user, setUser] = useState(null);
 
-  // close dropdown when clicking outside
   useEffect(() => {
     function onDocClick(e) {
       if (!menuRef.current) return;
@@ -37,9 +38,32 @@ export function Navigation() {
     return () => document.removeEventListener("mousedown", onDocClick);
   }, []);
 
-  const handleLogout = () => {
+  useEffect(() => {
+    async function loadUser() {
+      try {
+        const { data } = await supabase.auth.getSession();
+        const token = data.session?.access_token;
+        if (!token) return;
+
+        const res = await fetch("http://localhost:8000/me", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (!res.ok) return;
+
+        const dataJson = await res.json();
+        setUser(dataJson);
+      } catch (err) {
+        console.error("Failed to load user", err);
+      }
+    }
+
+    loadUser();
+  }, []);
+
+  const handleLogout = async () => {
     setOpen(false);
-    // later: clear auth here
+    await supabase.auth.signOut();
     nav("/signin");
   };
 
@@ -48,10 +72,19 @@ export function Navigation() {
     nav("/settings");
   };
 
+  function getInitials(name, email) {
+    if (name) {
+      const parts = name.trim().split(" ");
+      if (parts.length === 1) return parts[0][0].toUpperCase();
+      return (parts[0][0] + parts[1][0]).toUpperCase();
+    }
+    if (email) return email[0].toUpperCase();
+    return "?";
+  }
+
   return (
     <header className="relative z-50 w-full border-b border-border bg-card/90 backdrop-blur-sm shadow-sm">
       <div className="w-full px-8 h-20 flex items-center justify-between">
-        {/* LEFT */}
         <div className="flex items-center gap-10">
           <Link to="/" className="flex items-center gap-3">
             <div className="w-11 h-11 rounded-full bg-primary text-primary-foreground grid place-items-center text-base font-medium">
@@ -62,7 +95,6 @@ export function Navigation() {
             </div>
           </Link>
 
-          {/* Nav (Settings removed) */}
           <nav className="hidden sm:flex items-center gap-2">
             <NavItem to="/">Dashboard</NavItem>
             <NavItem to="/focus">Focus</NavItem>
@@ -71,7 +103,6 @@ export function Navigation() {
           </nav>
         </div>
 
-        {/* RIGHT: avatar + dropdown */}
         <div className="relative z-50" ref={menuRef}>
           <button
             onClick={() => setOpen((v) => !v)}
@@ -79,22 +110,22 @@ export function Navigation() {
             aria-haspopup="menu"
             aria-expanded={open}
           >
-            JD
+            {getInitials(user?.name, user?.email)}
           </button>
 
           {open && (
             <div className="absolute right-0 mt-3 w-80 bg-white z-50 rounded-2xl shadow-xl border border-[rgba(31,41,55,0.08)] overflow-hidden">
-              {/* header */}
               <div className="px-5 py-4">
                 <div className="text-lg font-semibold text-[#1F2937]">
-                  John Doe
+                  {user?.name || "No name set"}
                 </div>
-                <div className="text-sm text-[#6B7280]">john@example.com</div>
+                <div className="text-sm text-[#6B7280]">
+                  {user?.email || ""}
+                </div>
               </div>
 
               <div className="h-px bg-[rgba(31,41,55,0.08)]" />
 
-              {/* profile */}
               <button
                 onClick={goProfile}
                 className="w-full px-5 py-4 flex items-center gap-3 hover:bg-[#FAF7F2] transition text-left"
@@ -105,7 +136,6 @@ export function Navigation() {
 
               <div className="h-px bg-[rgba(31,41,55,0.08)]" />
 
-              {/* logout */}
               <button
                 onClick={handleLogout}
                 className="w-full px-5 py-4 flex items-center gap-3 hover:bg-[#FAF7F2] transition text-left"

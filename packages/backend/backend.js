@@ -2,28 +2,24 @@ import express from "express";
 import cors from "cors";
 import { pool } from "./db.js";
 import { requireUser } from "./requireUser.js";
-
+import { ensureUserRow } from "./ensureUserRow.js";
 const app = express();
 const port = 8000;
 
-app.use(
-  cors({
-    origin: ["http://localhost:5173", "http://localhost:3000"],
-    credentials: true,
-  }),
-);
+const corsOptions = {
+  origin: ["http://localhost:5173", "http://localhost:3000"],
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+};
 
+app.use(cors(corsOptions));
 app.use(express.json());
 
-app.get("/health", (req, res) => {
-  res.json({ ok: true });
-});
+app.get("/health", (req, res) => res.json({ ok: true }));
 
 app.use(requireUser);
-
-app.get("/me", (req, res) => {
-  res.json({ id: req.user.id, email: req.user.email });
-});
+app.use(ensureUserRow);
 
 app.get("/tasks", async (req, res) => {
   try {
@@ -528,6 +524,84 @@ app.patch("/tasks/:id/complete", async (req, res) => {
     console.error(err);
     res.status(500).json({ error: "Failed to complete task" });
   }
+});
+
+// profile
+app.get("/me", async (req, res) => {
+  const userId = req.user.id;
+
+  const result = await pool.query(
+    `SELECT id, email, name FROM users WHERE id = $1`,
+    [userId],
+  );
+
+  res.json(result.rows[0]); // { id, email, name }
+});
+
+app.patch("/me", async (req, res) => {
+  const userId = req.user.id;
+  const { name } = req.body;
+
+  const result = await pool.query(
+    `
+    UPDATE users
+    SET name = $1
+    WHERE id = $2
+    RETURNING id, email, name
+    `,
+    [name ?? null, userId],
+  );
+
+  res.json(result.rows[0]);
+});
+
+// settings
+app.get("/settings", async (req, res) => {
+  const userId = req.user.id;
+
+  const result = await pool.query(
+    `
+    SELECT sound_enabled, notifications_enabled, theme
+    FROM user_settings
+    WHERE user_id = $1
+    `,
+    [userId],
+  );
+
+  // return defaults if missing
+  res.json(
+    result.rows[0] ?? {
+      sound_enabled: true,
+      notifications_enabled: true,
+      theme: "light",
+    },
+  );
+});
+
+app.patch("/settings", async (req, res) => {
+  const userId = req.user.id;
+  const { sound_enabled, notifications_enabled, theme } = req.body;
+
+  const result = await pool.query(
+    `
+    UPDATE user_settings
+    SET
+      sound_enabled = COALESCE($1, sound_enabled),
+      notifications_enabled = COALESCE($2, notifications_enabled),
+      theme = COALESCE($3, theme),
+      updated_at = NOW()
+    WHERE user_id = $4
+    RETURNING sound_enabled, notifications_enabled, theme
+    `,
+    [
+      typeof sound_enabled === "boolean" ? sound_enabled : null,
+      typeof notifications_enabled === "boolean" ? notifications_enabled : null,
+      typeof theme === "string" ? theme : null,
+      userId,
+    ],
+  );
+
+  res.json(result.rows[0]);
 });
 
 app.listen(port, () => {

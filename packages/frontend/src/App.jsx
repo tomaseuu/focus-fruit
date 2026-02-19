@@ -15,7 +15,7 @@ import { SignIn } from "./pages/SignIn";
 import { SignUp } from "./pages/SignUp";
 
 import { useEffect, useState } from "react";
-import { supabase } from "./supabaseClient"; // adjust path if needed
+import { supabase } from "./supabaseClient";
 
 function RequireAuth({ children }) {
   const [loading, setLoading] = useState(true);
@@ -24,7 +24,7 @@ function RequireAuth({ children }) {
   useEffect(() => {
     async function boot() {
       const { data } = await supabase.auth.getSession();
-      console.log("SESSION:", data); // ✅ test log
+      console.log("SESSION:", data);
       setAuthed(!!data.session);
       setLoading(false);
     }

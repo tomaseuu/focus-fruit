@@ -2,6 +2,8 @@ import { supabaseAdmin } from "./supabaseAdmin.js";
 import { pool } from "./db.js";
 
 export async function requireUser(req, res, next) {
+  if (req.method === "OPTIONS") return next();
+
   try {
     const authHeader = req.headers.authorization || "";
 
@@ -19,15 +21,6 @@ export async function requireUser(req, res, next) {
     }
 
     req.user = data.user;
-
-    await pool.query(
-      `
-  INSERT INTO users (id, email)
-  VALUES ($1, $2)
-  ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email
-  `,
-      [req.user.id, req.user.email],
-    );
 
     next();
   } catch (err) {
