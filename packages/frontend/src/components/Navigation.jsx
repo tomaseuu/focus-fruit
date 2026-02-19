@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { NavLink, Link, useNavigate } from "react-router-dom";
 import { User, LogOut } from "lucide-react";
 import { supabase } from "../supabaseClient";
+import { apiFetch } from "../api";
 
 function NavItem({ to, children }) {
   return (
@@ -41,23 +42,12 @@ export function Navigation() {
   useEffect(() => {
     async function loadUser() {
       try {
-        const { data } = await supabase.auth.getSession();
-        const token = data.session?.access_token;
-        if (!token) return;
-
-        const res = await fetch("http://localhost:8000/me", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-
-        if (!res.ok) return;
-
-        const dataJson = await res.json();
-        setUser(dataJson);
+        const me = await apiFetch("/me");
+        setUser(me);
       } catch (err) {
         console.error("Failed to load user", err);
       }
     }
-
     loadUser();
   }, []);
 
